@@ -1,0 +1,26 @@
+# Base dependencies
+torch>=2.0.0
+torchaudio>=2.0.0
+numpy==1.24.3
+scipy==1.11.3
+
+# Video processing
+moviepy==1.0.3
+Pillow==10.0.0
+
+# Text to Speech
+gTTS==2.3.2
+
+# AI/ML
+google-generativeai==0.3.1
+huggingface-hub==0.16.4
+diffusers==0.18.0
+transformers==4.30.2
+accelerate==0.20.3
+
+# TikTok & Browser automation
+TikTokApi==5.2.2
+playwright==1.40.0
+
+# Utils
+python-dotenv==1.1.0
