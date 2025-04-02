@@ -1,39 +1,101 @@
-# content_generator.py
 import google.generativeai as genai
+import time
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 class ContentGenerator:
     def __init__(self):
         genai.configure(api_key="AIzaSyAB4o8VpccbEeM_jlCOIezJGYRDoA488Ig")
         self.model = genai.GenerativeModel('gemini-2.5-pro-exp-03-25')
     
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=4, max=10)
+    )
     def generate_content(self):
-        prompt = """
-        Buatkan script komedi pendek dengan karakter yang agak nyeleneh.
-        Format output HARUS PERSIS seperti ini:
-        
-        KARAKTER: [Deskripsi karakter]
-        VOICE_PRESET: male_funny
-        MOOD: [Mood karakter]
-        SETTING: [Deskripsi setting]
-        
-        DIALOG:
-        - [EXCITED] "Halo gaes!" [ekspresi: senang]
-        - [SURPRISED] "Anjir, gak nyangka!" [ekspresi: kaget]
-        - [ANGRY] "Dasar jembut!" [ekspresi: kesal]
-        
-        SOUND_EFFECT: laugh, boom, ding
-        
-        HASHTAG: #viral #comedy #lucu #trending #fyp
-        
-        Markup emosi yang tersedia: [EXCITED], [SURPRISED], [ANGRY], [HAPPY], [SAD]
-        """
-        
-        response = self.model.generate_content(prompt)
-        return {
-            "script": response.text,
-            "duration": 30,
-            "style": "comedy"
-        }
+        try:
+            prompt = """
+            Buatkan script video TikTok lucu dengan durasi 30 detik.
+            Format output HARUS seperti ini dan dialog HARUS lebih dari 5 kalimat:
+            
+            KARAKTER: Cowok Gen-Z dengan ekspresi berlebihan, rambut berantakan
+            MOOD: Energetic dan kocak
+            SETTING: Kamar dengan poster anime
+            
+            DIALOG:
+            - "Waduh gaes! Gak nyangka hari ini..." [ekspresi: excited]
+            - "Kalian tau gak sih, tadi pagi gue..." [ekspresi: storytelling]
+            - "Terus pas di jalan tuh ya..." [ekspresi: dramatic]
+            - "Eh tau-tau ada yang..." [ekspresi: surprised]
+            - "Yang bikin gue kaget tuh..." [ekspresi: shocked]
+            - "Akhirnya gue..." [ekspresi: relief]
+            - "Pokoknya intinya gaes..." [ekspresi: laughing]
+            - "Jangan lupa like, share, comment ya!" [ekspresi: happy]
+            
+            SOUND_EFFECT: laugh, boom, ding, wow
+            
+            HASHTAG: #viral #comedy #lucu #trending #fyp
+            
+            Note: Buat cerita yang mengalir dan lucu, dengan twist di tengah cerita.
+            """
+            
+            response = self.model.generate_content(prompt)
+            
+            if not response.text or len(response.text.split('\n')) < 10:
+                return {
+                    "script": """
+                    KARAKTER: Cowok Gen-Z dengan rambut berantakan
+                    MOOD: Super energetic
+                    SETTING: Kamar gaming setup
+                    
+                    DIALOG:
+                    - "Waduh gaes! Gak nyangka hari ini gue bakal cerita hal gokil!" [ekspresi: excited]
+                    - "Jadi tadi pagi ya, gue bangun kesiangan seperti biasa..." [ekspresi: storytelling]
+                    - "Pas lagi buru-buru, eh malah kepeleset kulit pisang!" [ekspresi: dramatic]
+                    - "Tapi yang bikin kocak, ternyata..." [ekspresi: buildup]
+                    - "Ada tetangga yang ngerekam, langsung viral dong!" [ekspresi: laughing]
+                    - "Sekarang followers TikTok gue nambah 10 ribu!" [ekspresi: shocked]
+                    - "Moral of the story: kadang kesialan bisa jadi berkah" [ekspresi: wise]
+                    - "Makanya jangan lupa follow gue ya gaes!" [ekspresi: happy]
+                    
+                    SOUND_EFFECT: laugh, boom, ding, wow, applause
+                    
+                    HASHTAG: #viral #comedy #lucu #trending #fyp
+                    """,
+                    "duration": 30,
+                    "style": "comedy"
+                }
+            
+            return {
+                "script": response.text,
+                "duration": 30,
+                "style": "comedy"
+            }
+            
+        except Exception as e:
+            print(f"Error generating content: {str(e)}")
+            return {
+                "script": """
+                KARAKTER: Cowok Gen-Z dengan rambut berantakan
+                MOOD: Super energetic
+                SETTING: Kamar gaming setup
+                
+                DIALOG:
+                - "Waduh gaes! Gak nyangka hari ini gue bakal cerita hal gokil!" [ekspresi: excited]
+                - "Jadi tadi pagi ya, gue bangun kesiangan seperti biasa..." [ekspresi: storytelling]
+                - "Pas lagi buru-buru, eh malah kepeleset kulit pisang!" [ekspresi: dramatic]
+                - "Tapi yang bikin kocak, ternyata..." [ekspresi: buildup]
+                - "Ada tetangga yang ngerekam, langsung viral dong!" [ekspresi: laughing]
+                - "Sekarang followers TikTok gue nambah 10 ribu!" [ekspresi: shocked]
+                - "Moral of the story: kadang kesialan bisa jadi berkah" [ekspresi: wise]
+                - "Makanya jangan lupa follow gue ya gaes!" [ekspresi: happy]
+                
+                SOUND_EFFECT: laugh, boom, ding, wow, applause
+                
+                HASHTAG: #viral #comedy #lucu #trending #fyp
+                """,
+                "duration": 30,
+                "style": "comedy"
+            }
     
     def parse_response(self, text):
         expressions = []

@@ -1,12 +1,15 @@
 import moviepy.editor as mpy
 from gtts import gTTS
 import os
-from diffusers import StableDiffusionPipeline
-import torch
-from moviepy.config import change_settings
-from bark import SAMPLE_RATE, generate_audio, preload_models
+from dotenv import load_dotenv
+import requests
+from PIL import Image
+from io import BytesIO
 import numpy as np
-from scipy.io.wavfile import write as write_wav
+from moviepy.video.tools.segmenting import findObjects
+
+# Load environment variables
+load_dotenv()
 
 output_dir = "output"
 if not os.path.exists(output_dir):
@@ -14,95 +17,123 @@ if not os.path.exists(output_dir):
 
 class VideoCreator:
     def __init__(self):
-        try:
-            if torch.backends.mps.is_available():
-                device = "mps"
-            else:
-                device = "cpu"
-            
-            self.pipe = StableDiffusionPipeline.from_pretrained(
-                "runwayml/stable-diffusion-v1-5",
-                torch_dtype=torch.float32
-            )
-            self.pipe = self.pipe.to(device)
-            
-            self.pipe.enable_attention_slicing()
-        except Exception as e:
-            print(f"Error saat inisialisasi VideoCreator: {str(e)}")
-            raise
+        self.hf_api_key = os.getenv('HUGGINGFACE_API_KEY')
+        if not self.hf_api_key:
+            raise ValueError("HUGGINGFACE_API_KEY tidak ditemukan di file .env")
     
-    def load_bark_models(self):
-        # Set environment variable untuk torch.load
-        os.environ['TORCH_LOAD_WEIGHTS_ONLY'] = '0'
+    def resize_image(self, image, size):
+        """Helper function untuk resize image dengan method yang benar"""
+        return image.resize(size, Image.Resampling.LANCZOS)
+    
+    def generate_character_frames(self, expressions):
+        frames = []
+        for expr in expressions:
+            try:
+                API_URL = "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5"
+                headers = {"Authorization": f"Bearer {self.hf_api_key}"}
+                
+                response = requests.post(
+                    API_URL,
+                    headers=headers,
+                    json={"inputs": f"cartoon character, {expr} expression, full body, centered"}
+                )
+                
+                if response.status_code == 200:
+                    frame = Image.open(BytesIO(response.content))
+                    frames.append(frame)
+                else:
+                    frames.append(self.get_placeholder_image())
+                    
+            except Exception as e:
+                print(f"Error generating frame for {expr}: {str(e)}")
+                frames.append(self.get_placeholder_image())
         
-        # Preload models dengan konfigurasi yang benar
-        preload_models()
-    
-    def generate_character_frame(self, expression, pose):
-        prompt = f"""
-        cartoon character, {expression} expression, {pose},
-        cute anime style, high quality, simple background,
-        full body shot, centered
-        """
+        return frames
+
+    def create_animated_character(self, frames, duration):
+        frame_clips = []
+        frame_duration = duration / len(frames)
         
-        image = self.pipe(prompt).images[0]
-        return image
-    
-    def generate_audio_bark(self, text, voice_preset="male_funny"):
-        try:
-            audio_array = generate_audio(
-                text,
-                history_prompt=self.voice_presets[voice_preset],
-                text_temp=0.7,
-                waveform_temp=0.7
-            )
+        for i, frame in enumerate(frames):
+            # Simpan frame
+            frame_path = os.path.join(output_dir, f"frame_{i}.png")
             
-            audio_path = os.path.join("output", "generated_audio.wav")
-            write_wav(audio_path, SAMPLE_RATE, audio_array)
+            # Resize frame
+            new_height = 600
+            aspect_ratio = frame.size[0] / frame.size[1]
+            new_width = int(new_height * aspect_ratio)
+            resized_frame = frame.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            resized_frame.save(frame_path, quality=95)
             
-            return audio_path
+            # Buat clip
+            clip = mpy.ImageClip(frame_path)
             
-        except Exception as e:
-            print(f"Error dalam generate audio: {str(e)}")
-            return None
-    
+            # Tambah efek gerak
+            clip = (clip
+                   .set_duration(frame_duration)
+                   .set_position(lambda t: (
+                       "center",
+                       800 + np.sin(t*2)*20  # Gerakan naik turun
+                   )))
+            
+            # Tambah efek rotasi untuk frame tertentu
+            if i % 2 == 0:
+                clip = clip.rotate(lambda t: np.sin(t*2)*5)  # Rotasi kecil
+            
+            frame_clips.append(clip)
+        
+        # Gabungkan frame dengan transisi
+        character = mpy.concatenate_videoclips(
+            frame_clips,
+            method="compose"
+        )
+        
+        return character
+
     def create_video(self, content):
         try:
             script_data = self.parse_script(content["script"])
             
-            # Generate audio dengan gTTS
+            # Generate audio
             audio_path = os.path.join(output_dir, "audio.mp3")
             tts = gTTS(text=script_data["dialog"], lang='id')
             tts.save(audio_path)
             
             audio = mpy.AudioFileClip(audio_path)
             
-            # Generate character frame
-            character_image = self.generate_character_frame("neutral", "standing")
-            character_path = os.path.join(output_dir, "character.png")
-            character_image.save(character_path)
+            # Generate character frames
+            print("Generating character frames...")
+            expressions = [
+                "neutral", "happy", "excited", 
+                "surprised", "laughing"
+            ]
+            frames = self.generate_character_frames(expressions)
             
             # Create video elements
+            print("Creating video elements...")
             bg = mpy.ColorClip(size=(1080, 1920), color=[20, 20, 20])
             bg = bg.set_duration(audio.duration)
             
-            character = mpy.ImageClip(character_path)
-            character = character.set_duration(audio.duration)
-            character = character.resize(height=600)
-            character = character.set_position(("center", 800))
+            # Create animated character
+            character = self.create_animated_character(frames, audio.duration)
             
-            # Add text
-            txt_clip = mpy.TextClip(
+            # Add animated text dengan efek bounce
+            txt_clip = (mpy.TextClip(
                 script_data["dialog"],
                 fontsize=70,
                 color='white',
                 size=(1000, 1800),
-                method='caption'
+                method='caption',
+                stroke_color='black',
+                stroke_width=2
             )
-            txt_clip = txt_clip.set_duration(audio.duration)
-            txt_clip = txt_clip.set_position(("center", 400))
+            .set_duration(audio.duration)
+            .set_position(lambda t: (
+                "center",
+                400 + np.sin(t*1.5)*10  # Text bergerak naik turun
+            )))
             
-            # Combine all elements
+            # Combine elements dengan efek
             final = mpy.CompositeVideoClip([
                 bg,
                 character,
@@ -110,24 +141,37 @@ class VideoCreator:
             ])
             final = final.set_audio(audio)
             
-            # Export
+            # Export dengan kualitas tinggi
+            print("Exporting video...")
             output_path = os.path.join(output_dir, "output_video.mp4")
             final.write_videofile(
                 output_path,
                 fps=30,
                 codec='libx264',
-                audio_codec='aac'
+                audio_codec='aac',
+                threads=4,
+                preset='medium'
             )
             
-            # Cleanup temporary files
-            os.remove(audio_path)
-            os.remove(character_path)
+            # Cleanup
+            self.cleanup_temp_files(audio_path)
             
             return output_path
             
         except Exception as e:
             print(f"Error dalam pembuatan video: {str(e)}")
             raise
+
+    def cleanup_temp_files(self, audio_path):
+        # Hapus file temporary
+        os.remove(audio_path)
+        for file in os.listdir(output_dir):
+            if file.startswith("frame_") and file.endswith(".png"):
+                os.remove(os.path.join(output_dir, file))
+
+    def get_placeholder_image(self):
+        # Buat gambar placeholder putih
+        return Image.new('RGB', (512, 512), color='white')
     
     def parse_script(self, script_text):
         try:
